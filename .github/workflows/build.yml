@@ -1,0 +1,62 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Unzip project
+        run: |
+          shopt -s nullglob
+          for z in *.zip; do
+            echo "Unzipping $z"
+            unzip -o -q "$z"
+          done
+
+      - name: Find project folder
+        run: |
+          SETTINGS=$(find . -name settings.gradle.kts -not -path "./.git/*" | head -n 1)
+          if [ -z "$SETTINGS" ]; then
+            echo "::error::RepeatPlayer.zip 파일을 찾지 못했습니다. 저장소에 zip 파일을 올렸는지 확인하세요."
+            exit 1
+          fi
+          echo "PROJECT_DIR=$(dirname "$SETTINGS")" >> "$GITHUB_ENV"
+
+      - name: Install Gradle 8.7
+        run: |
+          curl -fsSL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          unzip -q /tmp/gradle.zip -d "$HOME"
+
+      - name: Build APK
+        run: |
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          "$HOME/gradle-8.7/bin/gradle" -p "$PROJECT_DIR" assembleDebug --no-daemon --stacktrace
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" RepeatPlayer.apk
+
+      - name: Publish to Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}-${{ github.run_attempt }}" RepeatPlayer.apk \
+            --target "${{ github.sha }}" \
+            --title "반복 플레이어 #${{ github.run_number }}" \
+            --notes "아래 Assets에서 RepeatPlayer.apk를 눌러 휴대폰에 받은 뒤 설치하세요."
+
+      - name: Upload APK as artifact
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: RepeatPlayer-apk
+          path: RepeatPlayer.apk
+          if-no-files-found: ignore
